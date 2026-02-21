@@ -1,3 +1,6 @@
+import { parse } from '@babel/parser';
+import traverse from '@babel/traverse';
+
 /**
  * Execution Simulator — F8 Engine
  * Step-through execution state machine for simulating code without running it.
@@ -38,44 +41,84 @@ export const simulatorEngine = {
     },
 
     generateSteps(file: string, source: string): ExecutionStep[] {
-        const lines = source.split('\n');
         const steps: ExecutionStep[] = [];
         let stepIndex = 0;
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line || line.startsWith('//')) continue;
-
-            let type: StepType = 'expression';
-            let description = line.substring(0, 80);
-
-            if (/\bfunction\b|\bconst\s+\w+\s*=\s*(async\s+)?\(/.test(line)) {
-                type = 'function-call';
-                description = `Enter function: ${line.substring(0, 60)}`;
-            } else if (/\b(const|let|var)\s+\w+\s*=/.test(line)) {
-                type = 'assignment';
-                description = `Assign: ${line.substring(0, 60)}`;
-            } else if (/^\s*(if|else)\b/.test(line)) {
-                type = 'branch';
-                description = `Branch: ${line.substring(0, 60)}`;
-            } else if (/^\s*(for|while)\b/.test(line)) {
-                type = 'loop';
-                description = `Loop: ${line.substring(0, 60)}`;
-            } else if (/^\s*return\b/.test(line)) {
-                type = 'return';
-                description = `Return: ${line.substring(0, 60)}`;
-            }
-
-            steps.push({
-                id: crypto.randomUUID(),
-                stepIndex: stepIndex++,
-                type,
-                file,
-                line: i + 1,
-                description,
-                variables: {},
-                callStack: [],
+        try {
+            const ast = parse(source, {
+                sourceType: 'module',
+                plugins: ['typescript', 'jsx'],
             });
+
+            const addStep = (node: import("@babel/types").Node, type: StepType, descPrefix: string, name?: string) => {
+                if (!node.loc?.start?.line) return;
+                steps.push({
+                    id: crypto.randomUUID(),
+                    stepIndex: stepIndex++,
+                    type,
+                    file,
+                    line: node.loc.start.line,
+                    description: name ? `${descPrefix}: ${name}` : descPrefix,
+                    variables: {},
+                    callStack: [],
+                });
+            };
+
+            traverse(ast, {
+                FunctionDeclaration(path) {
+                    addStep(path.node, 'function-call', 'Enter function', path.node.id?.name);
+                },
+                ArrowFunctionExpression(path) {
+                    let name = 'anonymous';
+                    if (path.parentPath.isVariableDeclarator() && path.parentPath.node.id.type === 'Identifier') {
+                        name = path.parentPath.node.id.name;
+                    }
+                    addStep(path.node, 'function-call', 'Enter function', name);
+                },
+                VariableDeclarator(path) {
+                    if (path.node.id.type === 'Identifier') {
+                        addStep(path.node, 'assignment', 'Assign', path.node.id.name);
+                    } else {
+                        addStep(path.node, 'assignment', 'Assignment/Destructure');
+                    }
+                },
+                AssignmentExpression(path) {
+                    if (path.node.left.type === 'Identifier') {
+                        addStep(path.node, 'assignment', 'Assign', path.node.left.name);
+                    } else {
+                        addStep(path.node, 'assignment', 'Assignment');
+                    }
+                },
+                IfStatement(path) { addStep(path.node, 'branch', 'Branch (if)'); },
+                SwitchStatement(path) { addStep(path.node, 'branch', 'Branch (switch)'); },
+                ConditionalExpression(path) { addStep(path.node, 'branch', 'Branch (ternary)'); },
+                ForStatement(path) { addStep(path.node, 'loop', 'Loop (for)'); },
+                ForOfStatement(path) { addStep(path.node, 'loop', 'Loop (for...of)'); },
+                ForInStatement(path) { addStep(path.node, 'loop', 'Loop (for...in)'); },
+                WhileStatement(path) { addStep(path.node, 'loop', 'Loop (while)'); },
+                DoWhileStatement(path) { addStep(path.node, 'loop', 'Loop (do...while)'); },
+                ReturnStatement(path) { addStep(path.node, 'return', 'Return'); },
+                CallExpression(path) {
+                    // Try to extract function name if we are not part of an assignment/declaration (to avoid dupes)
+                    if (path.node.callee.type === 'Identifier') {
+                        addStep(path.node, 'expression', 'Call', path.node.callee.name);
+                    } else if (path.node.callee.type === 'MemberExpression' && path.node.callee.property.type === 'Identifier') {
+                        addStep(path.node, 'expression', 'Call method', path.node.callee.property.name);
+                    }
+                }
+            });
+
+            // Traverse visits nodes in depth-first order.
+            // For a top-to-bottom step-through, we sort primarily by line number.
+            steps.sort((a, b) => a.line - b.line);
+
+            // Re-index steps
+            steps.forEach((s, i) => s.stepIndex = i);
+
+        } catch (err) {
+            console.error('Failed to parse AST for simulation steps:', err);
+            // Fallback to empty if parse fails
+            return [];
         }
 
         return steps;
