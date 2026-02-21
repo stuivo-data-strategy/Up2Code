@@ -814,6 +814,13 @@ export default function GovernancePage() {
                                                                     {issue.line ? `View in Code (L${issue.line})` : 'View in Code'}
                                                                 </button>
 
+                                                                <a
+                                                                    href={`/explorer?repoId=${selectedRepo?.id ?? ''}&file=${encodeURIComponent(issue.file)}${issue.line ? `&line=${issue.line}` : ''}`}
+                                                                    className="text-xs px-2 py-1 border border-violet-500/30 rounded bg-violet-600/10 hover:bg-violet-600/20 text-violet-300 transition-colors flex items-center gap-1"
+                                                                >
+                                                                    Explorer ⌂
+                                                                </a>
+
                                                                 <button
                                                                     onClick={() => ignored ? toggleIgnore(issue) : setIgnoringIssue(issue)}
                                                                     className="text-xs shrink-0 px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400"

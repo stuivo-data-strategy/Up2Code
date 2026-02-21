@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
@@ -39,6 +39,7 @@ export default function ExplorerPage() {
 
     const [fileContent, setFileContent] = useState<string>('');
     const [loadingContent, setLoadingContent] = useState(false);
+    const [selectedLine, setSelectedLine] = useState<number | null>(null);
 
     // Initial load of repositories
     useEffect(() => {
@@ -46,17 +47,46 @@ export default function ExplorerPage() {
             .then(res => res.json())
             .then(data => {
                 setRepos(data);
-                if (data.length > 0) setSelectedRepo(data[0]);
+
+                const params = new URLSearchParams(window.location.search);
+                const repoIdParam = params.get('repoId');
+                const fileParam = params.get('file');
+                const lineParam = params.get('line');
+
+                let targetRepo = data.length > 0 ? data[0] : null;
+                if (repoIdParam) {
+                    const found = data.find((r: Repository) => r.id === repoIdParam);
+                    if (found) targetRepo = found;
+                }
+
+                if (targetRepo) {
+                    setSelectedRepo(targetRepo);
+                }
+
+                if (fileParam) {
+                    setSelectedFilePath(fileParam);
+                }
+
+                if (lineParam) {
+                    setSelectedLine(parseInt(lineParam, 10));
+                }
             })
             .catch(console.error);
     }, []);
+
+    const isInitialLoad = useRef(true);
 
     // Load files and issues when a repository is selected
     useEffect(() => {
         if (!selectedRepo) return;
         setLoadingData(true);
-        setSelectedFilePath(null);
-        setFileContent('');
+
+        if (isInitialLoad.current) {
+            isInitialLoad.current = false;
+        } else {
+            setSelectedFilePath(null);
+            setFileContent('');
+        }
 
         Promise.all([
             fetch(`/api/repositories/${selectedRepo.id}/files`).then(r => r.json()),
@@ -128,9 +158,26 @@ export default function ExplorerPage() {
         });
     }, [files, searchQuery]);
 
+    useEffect(() => {
+        if (fileContent && selectedLine) {
+            setTimeout(() => {
+                const el = document.getElementById(`line-${selectedLine}`);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 100);
+        }
+    }, [fileContent, selectedLine]);
+
     const activeIssues = useMemo(() => {
         if (!selectedFilePath) return [];
-        return issues.filter(i => i.file === selectedFilePath);
+        return issues
+            .filter(i => i.file === selectedFilePath)
+            .sort((a, b) => {
+                const lineA = a.line ?? Number.MAX_SAFE_INTEGER;
+                const lineB = b.line ?? Number.MAX_SAFE_INTEGER;
+                return lineA - lineB;
+            });
     }, [issues, selectedFilePath]);
 
     const lineHasError = (lineNumber: number) => {
@@ -149,7 +196,7 @@ export default function ExplorerPage() {
     const breadcrumb = selectedFilePath ? selectedFilePath.split('/') : [];
 
     return (
-        <div className="flex-1 flex h-screen overflow-hidden">
+        <div className="h-screen w-full flex overflow-hidden bg-[#030712]">
             {/* File tree sidebar */}
             <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0 min-h-0">
                 <div className="p-4 border-b border-gray-800 flex flex-col gap-3">
@@ -204,7 +251,14 @@ export default function ExplorerPage() {
                                         className={`py-1 pr-2 mt-0.5 cursor-pointer flex items-center gap-2 rounded ${selectedFilePath === node.path ? 'bg-violet-600/20 text-violet-300 font-bold' :
                                             'hover:bg-gray-800 hover:text-white text-gray-400'
                                             } transition-colors`}
-                                        onClick={() => isDir ? toggleDir(node.path) : setSelectedFilePath(node.path)}
+                                        onClick={() => {
+                                            if (isDir) {
+                                                toggleDir(node.path);
+                                            } else {
+                                                setSelectedFilePath(node.path);
+                                                setSelectedLine(null);
+                                            }
+                                        }}
                                     >
                                         <span className="text-gray-500 text-[10px] w-3 flex justify-center shrink-0">
                                             {isDir ? (collapsed.has(node.path) ? '▶' : '▼') : '·'}
@@ -222,7 +276,7 @@ export default function ExplorerPage() {
             </aside>
 
             {/* Code viewer */}
-            <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex-1 flex flex-col overflow-hidden min-h-0 min-w-0">
                 {/* Breadcrumb */}
                 <div className="px-5 py-3 border-b border-gray-800 bg-gray-900 flex items-center gap-1 text-sm flex-wrap">
                     {breadcrumb.map((crumb, i) => (
@@ -236,41 +290,45 @@ export default function ExplorerPage() {
                 </div>
 
                 {/* Code + issues split */}
-                <div className="flex-1 overflow-y-auto custom-scrollbar relative bg-[#030712]">
+                <div className="flex-1 relative bg-[#030712] min-h-0">
                     {!selectedFilePath ? (
-                        <div className="flex h-full items-center justify-center text-gray-600 text-sm">
+                        <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-sm">
                             Select a file to view code
                         </div>
                     ) : loadingContent ? (
-                        <div className="flex h-full items-center justify-center text-gray-500 text-sm animate-pulse">
+                        <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm animate-pulse">
                             Loading Source Code...
                         </div>
                     ) : (
-                        <SyntaxHighlighter
-                            language={selectedFilePath.split('.').pop() === 'ts' || selectedFilePath.split('.').pop() === 'tsx' ? 'typescript' : 'javascript'}
-                            style={atomOneDark}
-                            showLineNumbers
-                            lineNumberStyle={{ color: '#4b5563', minWidth: '3em', paddingRight: '1em', textAlign: 'right', userSelect: 'none' }}
-                            wrapLines={true}
-                            lineProps={(lineNumber) => {
-                                const error = lineHasError(lineNumber);
-                                return {
-                                    style: {
-                                        display: 'block',
-                                        backgroundColor: error ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
-                                    },
-                                    className: error ? 'border-r-2 border-red-500' : ''
-                                };
-                            }}
-                            customStyle={{ margin: 0, padding: '1.5rem', background: '#030712', fontSize: '0.8rem', lineHeight: '1.5' }}
-                        >
-                            {fileContent}
-                        </SyntaxHighlighter>
+                        <div className="absolute inset-0 overflow-auto">
+                            <SyntaxHighlighter
+                                language={selectedFilePath.split('.').pop() === 'ts' || selectedFilePath.split('.').pop() === 'tsx' ? 'typescript' : 'javascript'}
+                                style={atomOneDark}
+                                showLineNumbers
+                                lineNumberStyle={{ color: '#4b5563', minWidth: '3em', paddingRight: '1em', textAlign: 'right', userSelect: 'none' }}
+                                wrapLines={true}
+                                lineProps={(lineNumber) => {
+                                    const error = lineHasError(lineNumber);
+                                    const isSelected = lineNumber === selectedLine;
+                                    return {
+                                        id: `line-${lineNumber}`,
+                                        style: {
+                                            display: 'block',
+                                            backgroundColor: isSelected ? 'rgba(139, 92, 246, 0.2)' : (error ? 'rgba(239, 68, 68, 0.15)' : 'transparent'),
+                                        },
+                                        className: isSelected ? 'border-l-4 border-violet-500' : (error ? 'border-r-2 border-red-500' : '')
+                                    };
+                                }}
+                                customStyle={{ margin: 0, padding: '1.5rem', background: '#030712', fontSize: '0.8rem', lineHeight: '1.5', minHeight: '100%' }}
+                            >
+                                {fileContent}
+                            </SyntaxHighlighter>
+                        </div>
                     )}
                 </div>
 
                 {/* Issues panel */}
-                <div className="border-t border-gray-800 bg-gray-900 border-b-0 h-48 flex flex-col shrink-0 min-h-0">
+                <div className="border-t border-gray-800 bg-gray-900 border-b-0 h-48 flex flex-col shrink-0 relative z-20 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
                     <div className="px-4 py-2 border-b border-gray-800 shrink-0 sticky top-0 bg-gray-900 z-10 flex justify-between items-center">
                         <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">Analysis Hints</p>
                         <span className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full">{activeIssues.length} total</span>
@@ -284,8 +342,12 @@ export default function ExplorerPage() {
                         ) : (
                             <div className="space-y-0 divide-y divide-gray-800/50">
                                 {activeIssues.map((issue, i) => (
-                                    <div key={i} className="flex items-start gap-4 p-4 hover:bg-gray-800/30 transition-colors">
-                                        <div className="flex flex-col items-center gap-1 shrink-0 w-12">
+                                    <div
+                                        key={i}
+                                        className="flex items-start gap-4 p-4 hover:bg-gray-800/30 transition-colors cursor-pointer group"
+                                        onClick={() => issue.line ? setSelectedLine(issue.line) : null}
+                                    >
+                                        <div className="flex flex-col items-center gap-1 shrink-0 w-12 group-hover:scale-105 transition-transform">
                                             <span className={`text-[10px] uppercase font-bold tracking-wider rounded px-1.5 py-0.5 w-full text-center
                                                 ${issue.severity === 'critical' ? 'bg-red-500/10 text-red-500 border border-red-500/20' :
                                                     issue.severity === 'high' ? 'bg-orange-500/10 text-orange-500 border border-orange-500/20' :
