@@ -12,6 +12,7 @@ export const metadata: Metadata = {
 
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', icon: '⬡' },
+  { href: '/ingest', label: 'Ingest', icon: '↓' },
   { href: '/explorer', label: 'Explorer', icon: '⌂' },
   { href: '/simulator', label: 'Simulator', icon: '▶' },
   { href: '/governance', label: 'Governance', icon: '⚖' },

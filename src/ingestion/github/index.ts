@@ -25,13 +25,21 @@ export interface GitHubTreeItem {
     size?: number;
 }
 
+function getAuthHeaders(): Record<string, string> {
+    const token = config.github.token;
+    // Only attach auth header if a real token is configured (not a placeholder)
+    const isRealToken = token && token.length > 10 && !token.startsWith('ghp_your');
+    return {
+        ...(isRealToken ? { Authorization: `Bearer ${token}` } : {}),
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+    };
+}
+
 async function apiFetch<T>(endpoint: string): Promise<T> {
     const url = `${config.github.apiBase}${endpoint}`;
     const res = await fetch(url, {
-        headers: {
-            Authorization: `Bearer ${config.github.token}`,
-            Accept: 'application/vnd.github+json',
-        },
+        headers: getAuthHeaders(),
         next: { revalidate: 60 },
     });
     if (!res.ok) {

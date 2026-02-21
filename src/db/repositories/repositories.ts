@@ -46,6 +46,25 @@ export const repositoryRepo = {
         await sql`UPDATE repositories SET risk_score = ${score}, risk_grade = ${grade}, updated_at = NOW() WHERE id = ${id}`;
     },
 
+    async updateMetadata(id: string, data: {
+        primary_language?: string | null;
+        frameworks?: string[];
+        total_files?: number;
+        last_analysed_at?: string | null;
+    }): Promise<Repository> {
+        const rows = await sql`
+            UPDATE repositories SET
+                primary_language = COALESCE(${data.primary_language ?? null}, primary_language),
+                frameworks       = COALESCE(${data.frameworks ?? null}, frameworks),
+                total_files      = COALESCE(${data.total_files ?? null}, total_files),
+                last_analysed_at = COALESCE(${data.last_analysed_at ?? null}, last_analysed_at),
+                updated_at       = NOW()
+            WHERE id = ${id}
+            RETURNING *
+        `;
+        return rows[0] as Repository;
+    },
+
     async delete(id: string): Promise<void> {
         await sql`DELETE FROM repositories WHERE id = ${id}`;
     },

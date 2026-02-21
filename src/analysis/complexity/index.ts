@@ -11,6 +11,7 @@ export interface ComplexityResult {
     commentLines: number;
     blankLines: number;
     rating: 'low' | 'medium' | 'high' | 'critical';
+    maxDepthLine?: number;
 }
 
 const BRANCH_PATTERNS = [
@@ -34,11 +35,20 @@ export const complexityAnalyser = {
         // Cognitive: penalise nesting depth
         let cognitive = 0;
         let depth = 0;
-        for (const line of lines) {
+        let maxDepth = 0;
+        let maxDepthLine = 1;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
             const opens = (line.match(/\{/g) ?? []).length;
             const closes = (line.match(/\}/g) ?? []).length;
             if (/\b(if|for|while|switch)\b/.test(line)) cognitive += depth + 1;
             depth = Math.max(0, depth + opens - closes);
+
+            if (depth > maxDepth) {
+                maxDepth = depth;
+                maxDepthLine = i + 1;
+            }
         }
 
         const rating =
@@ -46,7 +56,7 @@ export const complexityAnalyser = {
                 cyclomatic > 10 ? 'high' :
                     cyclomatic > 5 ? 'medium' : 'low';
 
-        return { file, cyclomaticComplexity: cyclomatic, cognitiveComplexity: cognitive, linesOfCode, commentLines, blankLines, rating };
+        return { file, cyclomaticComplexity: cyclomatic, cognitiveComplexity: cognitive, linesOfCode, commentLines, blankLines, rating, maxDepthLine };
     },
 
     analyseMany(files: Array<{ path: string; content: string }>): ComplexityResult[] {
